@@ -482,8 +482,9 @@ kbd { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius
     g.queue = [];
     g.shake = reduceMotion ? 0 : 0.5;
     sfx('die');
-    if (g.lives <= 0) g.pendingOver = g.time + 1.6;
-    else g.playerRespawnAt = g.time + 1.4;
+    g.quip = nextQuip(); g.diedAt = g.time;
+    if (g.lives <= 0) g.pendingOver = g.time + 2.2;
+    else g.playerRespawnAt = g.time + 1.8;
   }
 
   function update(g) {
@@ -625,12 +626,40 @@ kbd { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius
     ctx.globalAlpha = 1;
   }
 
-  function centerText(big, small, color) {
+  // Things the game says to you when you die. One is picked each time, never the same twice in a row.
+  const QUIPS = [
+    'OUCH!', 'YOU SUCK', 'SPLAT!', 'WORM FOOD', 'NICE ONE, GENIUS', 'DIRT NAP',
+    'SKILL ISSUE', 'WHOOPS', 'SQUISHED', 'MAYBE TRY STEERING', 'BAIT MATERIAL',
+    'THE BIRDS ARE LAUGHING', 'WAS THAT ON PURPOSE?', 'NOODLED', 'WRIGGLE HARDER',
+    'BACK TO THE COMPOST', 'YIKES', 'TANGLED UP', 'EYES ON THE DIRT', 'BONK',
+  ];
+  let lastQuip = '';
+  function nextQuip() {
+    let q;
+    do { q = pick(QUIPS); } while (q === lastQuip);
+    return (lastQuip = q);
+  }
+
+  // Big message in the middle of the field. `age` (seconds since it appeared) drives a quick pop-in.
+  function centerText(big, small, color, age = 1) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '56px Bungee, "Arial Black", sans-serif';
-    ctx.fillStyle = '#4a3627'; ctx.fillText(big, W / 2 + 4, H / 2 - 10 + 4);
-    ctx.fillStyle = color; ctx.fillText(big, W / 2, H / 2 - 10);
-    if (small) { ctx.font = '600 20px "IBM Plex Mono", monospace'; ctx.fillStyle = '#f2e6d2'; ctx.fillText(small, W / 2, H / 2 + 40); }
+    ctx.globalAlpha = Math.min(1, age * 5) * 0.55;
+    ctx.fillStyle = '#110b07'; ctx.fillRect(0, H / 2 - 70, W, small ? 150 : 110);
+    ctx.globalAlpha = 1;
+    let size = 64;
+    ctx.font = `${size}px Bungee, "Arial Black", sans-serif`;
+    const width = ctx.measureText(big).width;
+    if (width > W - 80) { size = Math.floor(size * (W - 80) / width); ctx.font = `${size}px Bungee, "Arial Black", sans-serif`; }
+    const t = Math.min(1, age / 0.25);
+    const pop = reduceMotion ? 1 : 0.6 + 0.4 * t + 0.15 * Math.sin(t * Math.PI);
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 14);
+    ctx.scale(pop, pop);
+    ctx.rotate(reduceMotion ? 0 : -0.03);
+    ctx.fillStyle = '#4a3627'; ctx.fillText(big, 4, 4);
+    ctx.fillStyle = color; ctx.fillText(big, 0, 0);
+    ctx.restore();
+    if (small) { ctx.font = '600 20px "IBM Plex Mono", monospace'; ctx.fillStyle = '#f2e6d2'; ctx.fillText(small, W / 2, H / 2 + 44); }
   }
 
   function render(g) {
@@ -655,8 +684,8 @@ kbd { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius
     if (g.withPlayer && g.player && !g.player.alive && state === 'playing') {
       if (g.lives > 0) {
         const left = Math.max(0, g.playerRespawnAt - g.time);
-        centerText('OUCH!', `${g.lives} ${g.lives === 1 ? 'life' : 'lives'} left · back in ${left.toFixed(1)}s`, '#ff5d8f');
-      } else centerText('GAME OVER', null, '#ff5d8f');
+        centerText(g.quip, `${g.lives} ${g.lives === 1 ? 'life' : 'lives'} left · back in ${left.toFixed(1)}s`, '#ff5d8f', g.time - g.diedAt);
+      } else centerText(g.quip, 'Game over', '#ff5d8f', g.time - g.diedAt);
     }
   }
 
