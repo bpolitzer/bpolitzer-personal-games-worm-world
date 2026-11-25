@@ -1,0 +1,15 @@
+{
+  "name": "worm-world",
+  "private": true,
+  "type": "module",
+  "description": "Worm World arcade game with a world leaderboard on Netlify Functions + Blobs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@netlify/blobs": "11.1.9"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

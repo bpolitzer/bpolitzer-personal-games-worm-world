@@ -1,0 +1,968 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Worm World</title>
+<meta name="description" content="Worm World: steer your pink worm, dodge every trail, and grow when other worms crash into yours. A free arcade survival game in your browser.">
+<meta name="theme-color" content="#110b07">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Worm World">
+<meta property="og:description" content="Worm World: steer your pink worm, dodge every trail, and grow when other worms crash into yours. A free arcade survival game in your browser.">
+<meta property="og:url" content="https://worm-world.netlify.app/">
+<meta property="og:image" content="https://worm-world.netlify.app/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Worm World title over colorful worms tunneling through soil">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://worm-world.netlify.app/og-image.png">
+<link rel="canonical" href="https://worm-world.netlify.app/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23110b07'/%3E%3Cg fill='%23ff5d8f'%3E%3Crect x='8' y='38' width='11' height='11' rx='4' opacity='.45'/%3E%3Crect x='21' y='38' width='11' height='11' rx='4' opacity='.7'/%3E%3Crect x='34' y='38' width='11' height='11' rx='4' opacity='.85'/%3E%3Ccircle cx='46' cy='30' r='10'/%3E%3C/g%3E%3Ccircle cx='49' cy='27' r='2.6' fill='%23fff'/%3E%3Ccircle cx='50' cy='27' r='1.3' fill='%23110b07'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one-screen arcade cabinet. HUD strip on top, a soil cross-section playfield below, menus float over the field. */
+:root {
+  --soil-deep: #110b07;
+  --soil: #1c140e;
+  --loam: #2a1e15;
+  --root: #4a3627;
+  --chalk: #f2e6d2;
+  --dim: #a8927a;
+  --pink: #ff5d8f;
+  --gold: #ffc145;
+  --display: "Bungee", "Arial Black", Impact, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { height: 100%; }
+body {
+  height: 100%; margin: 0; overflow: hidden;
+  background: var(--soil-deep); color: var(--chalk);
+  font: 14px/1.45 var(--mono);
+}
+#app {
+  height: 100%; max-width: 1400px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* HUD */
+.hud { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 22px; }
+.brand { font-family: var(--display); font-size: 18px; line-height: .92; color: var(--pink); margin-right: auto; }
+.brand span { color: var(--chalk); }
+.stat { display: flex; flex-direction: column; gap: 2px; min-width: 58px; }
+.lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .16em; color: var(--dim); }
+.val { font-family: var(--display); font-size: 20px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.val.trail { color: var(--pink); transition: transform .2s; display: inline-block; }
+.val.trail.bump { animation: bump .45s ease-out; }
+@keyframes bump { 0% { transform: scale(1); } 30% { transform: scale(1.35); color: var(--gold); } 100% { transform: scale(1); } }
+.lives { display: flex; gap: 6px; align-items: center; height: 22px; }
+.life { width: 15px; height: 15px; border-radius: 50%; background: var(--pink); box-shadow: 0 0 8px var(--pink); transition: all .3s; }
+.life.lost { background: transparent; box-shadow: none; outline: 2px solid var(--root); outline-offset: -2px; }
+
+/* Stage */
+#stage { flex: 1; min-height: 0; position: relative; display: grid; place-items: center; }
+#stage.playing { touch-action: none; }
+#wrap { position: relative; border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 2px var(--root), 0 24px 60px rgba(0,0,0,.55); }
+canvas { display: block; }
+
+.overlay {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; overflow: auto; padding: 16px;
+  background: rgba(17, 11, 7, .66); backdrop-filter: blur(3px);
+}
+.panel { width: 100%; max-width: 640px; margin: auto; display: flex; flex-direction: column; gap: 16px; }
+.title {
+  font-family: var(--display); margin: 0; line-height: .86;
+  font-size: clamp(40px, min(10vw, 10vh), 96px); letter-spacing: -.01em;
+  color: var(--pink); text-shadow: 4px 4px 0 var(--root); text-wrap: balance;
+}
+.title span { display: block; color: var(--chalk); }
+.tag { margin: 0; color: var(--dim); max-width: 56ch; font-size: 15px; }
+.rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.rules li { background: rgba(42, 30, 21, .85); border: 1px solid var(--root); border-radius: 8px; padding: 12px; font-size: 13px; min-width: 0; }
+.rules b { display: block; font-family: var(--display); font-weight: 400; font-size: 13px; margin-bottom: 4px; letter-spacing: .02em; }
+.rules li:nth-child(1) b { color: #ff7c3f; }
+.rules li:nth-child(2) b { color: var(--gold); }
+.rules li:nth-child(3) b { color: #3fd3e6; }
+.scoring { font-size: 13px; color: var(--dim); margin: 0; }
+.scoring strong { color: var(--chalk); font-weight: 600; }
+
+h2 { font-family: var(--display); font-weight: 400; margin: 0; font-size: clamp(30px, 6vw, 54px); line-height: 1; color: var(--chalk); text-shadow: 3px 3px 0 var(--root); }
+h3 { font-family: var(--display); font-weight: 400; margin: 0 0 6px; font-size: 15px; letter-spacing: .04em; color: var(--gold); }
+
+.scores { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.scores td { padding: 5px 8px; border-bottom: 1px dashed rgba(168, 146, 122, .25); }
+.scores .rk { color: var(--dim); width: 2.5em; }
+.scores .nm { font-family: var(--display); letter-spacing: .12em; }
+.scores .sc { text-align: right; font-weight: 600; }
+.scores .tm { text-align: right; color: var(--dim); width: 5em; }
+.scores tr.me td { color: var(--pink); background: rgba(255, 93, 143, .1); }
+.scores tr.me .rk { color: var(--pink); }
+.boardhead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.boardhead h3 { margin: 0; }
+.tabs { display: flex; gap: 4px; }
+.tab { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); background: transparent; border: 1px solid var(--root); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.tab.on { color: var(--soil-deep); background: var(--gold); border-color: var(--gold); }
+.tab:disabled { opacity: .45; cursor: default; }
+.tab:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+#submitStatus { margin: 8px 0 0; min-height: 1.4em; }
+
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn {
+  font-family: var(--display); font-size: 16px; letter-spacing: .03em;
+  background: var(--pink); color: var(--soil-deep); border: 0; border-radius: 8px;
+  padding: 12px 18px; cursor: pointer; box-shadow: 0 4px 0 #a8325a;
+}
+.btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #a8325a; }
+.btn.ghost { background: transparent; color: var(--chalk); box-shadow: inset 0 0 0 2px var(--root); }
+.btn:focus-visible, .arrow:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+kbd { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--root); background: var(--loam); color: var(--chalk); }
+.small { font-size: 12px; color: var(--dim); }
+
+.final { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.final > div { background: rgba(42, 30, 21, .85); border: 1px solid var(--root); border-radius: 8px; padding: 10px; min-width: 0; }
+.final .val { font-size: 22px; }
+.final .big { color: var(--pink); }
+
+.entry { display: flex; flex-direction: column; gap: 12px; }
+.slots { display: flex; gap: 14px; }
+.slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ch {
+  font-family: var(--display); font-size: 46px; width: 68px; height: 74px;
+  display: grid; place-items: center; cursor: pointer;
+  background: var(--loam); border: 2px solid var(--root); border-radius: 8px; color: var(--chalk);
+}
+.slot.active .ch { border-color: var(--pink); color: var(--pink); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { border-color: var(--root); } }
+.arrow { background: none; border: 0; color: var(--dim); font-size: 16px; cursor: pointer; padding: 2px 16px; border-radius: 4px; }
+.arrow:hover { color: var(--chalk); }
+
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; font-size: 12px; color: var(--dim); }
+
+@media (max-width: 640px) {
+  .rules, .final { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rules li:last-child { grid-column: 1 / -1; }
+  .brand { display: none; }
+  .hud { gap: 6px 14px; }
+  .val { font-size: 17px; }
+  .ch { width: 56px; height: 64px; font-size: 38px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .slot.active .ch, .val.trail.bump { animation: none; }
+}
+</style>
+<style>
+  /* standalone page: keep content clear of phone notches */
+  html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="hud">
+    <div class="brand">WORM<br><span>WORLD</span></div>
+    <div class="stat"><span class="lbl">Score</span><span class="val" id="hScore">0</span></div>
+    <div class="stat"><span class="lbl">Time</span><span class="val" id="hTime">0:00</span></div>
+    <div class="stat"><span class="lbl">Your trail</span><span class="val trail" id="hTrail">3.0s</span></div>
+    <div class="stat"><span class="lbl">Crashed into you</span><span class="val" id="hCrash">0</span></div>
+    <div class="stat"><span class="lbl">Lives</span><span class="lives" id="hLives"><i class="life"></i><i class="life"></i><i class="life"></i></span></div>
+    <div class="stat"><span class="lbl">High score</span><span class="val" id="hHigh">0</span></div>
+  </header>
+
+  <main id="stage">
+    <div id="wrap"><canvas id="field" aria-label="Worm World playfield"></canvas></div>
+
+    <section class="overlay" id="ovTitle">
+      <div class="panel">
+        <h1 class="title">Worm<span>World</span></h1>
+        <p class="tag">You are the pink worm. Every worm drags a glowing trail behind it. Stay alive underground as long as you can.</p>
+        <ul class="rules">
+          <li><b>Don't cross</b>Running into any trail costs a life. That includes your own.</li>
+          <li><b>Grow on their mistakes</b>When a worm crashes into your trail, its trail seconds are added to yours.</li>
+          <li><b>Edges wrap</b>Tunnel off one side of the screen and pop out the other.</li>
+        </ul>
+        <p class="scoring">Scoring: <strong>10 pts</strong> per second survived, <strong>250 pts</strong> per worm that crashes into you. You get <strong>3 lives</strong>.</p>
+        <div class="row">
+          <button class="btn" id="btnStart" type="button">Dig in</button>
+          <span class="small">or press <kbd>Enter</kbd> · steer with <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> or swipe</span>
+        </div>
+        <div>
+          <div class="boardhead"><h3>Top diggers</h3><div class="tabs"><button class="tab" type="button" data-board="world">World</button><button class="tab" type="button" data-board="mine">This device</button></div></div>
+          <table class="scores"><tbody id="titleScores"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section class="overlay" id="ovPause" hidden>
+      <div class="panel" style="max-width:420px">
+        <h2>Paused</h2>
+        <div class="row">
+          <button class="btn" id="btnResume" type="button">Resume</button>
+          <button class="btn ghost" id="btnQuit" type="button">Quit to title</button>
+        </div>
+        <span class="small">Press <kbd>P</kbd> to resume</span>
+      </div>
+    </section>
+
+    <section class="overlay" id="ovOver" hidden>
+      <div class="panel">
+        <h2>Game over</h2>
+        <div class="final">
+          <div><span class="lbl">Score</span><div class="val big" id="fScore">0</div></div>
+          <div><span class="lbl">Survived</span><div class="val" id="fTime">0:00</div></div>
+          <div><span class="lbl">Crashed into you</span><div class="val" id="fCrash">0</div></div>
+          <div><span class="lbl">Longest trail</span><div class="val" id="fTrail">3.0s</div></div>
+        </div>
+
+        <div class="entry" id="entryBox" hidden>
+          <h3>New high score! Enter your initials</h3>
+          <div class="slots" id="slots"></div>
+          <div class="row">
+            <button class="btn" id="btnSave" type="button">Save score</button>
+            <span class="small">Type letters, or <kbd>↑</kbd><kbd>↓</kbd> to change and <kbd>←</kbd><kbd>→</kbd> to move. <kbd>Enter</kbd> saves.</span>
+          </div>
+        </div>
+
+        <div id="tableBox" hidden>
+          <div class="boardhead"><h3>High scores</h3><div class="tabs"><button class="tab" type="button" data-board="world">World</button><button class="tab" type="button" data-board="mine">This device</button></div></div>
+          <table class="scores"><tbody id="overScores"></tbody></table>
+          <p class="small" id="submitStatus" role="status"></p>
+        </div>
+
+        <div class="row" id="overButtons" hidden>
+          <button class="btn" id="btnAgain" type="button">Play again</button>
+          <button class="btn ghost" id="btnTitle" type="button">Title screen</button>
+          <span class="small"><kbd>Enter</kbd> play again · <kbd>Esc</kbd> title</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="hint">
+    <span>Arrows / WASD steer · <kbd>P</kbd> pause · <kbd>M</kbd> sound</span>
+    <span id="soundState">Sound: on</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ---------- constants ----------
+  const COLS = 64, ROWS = 40, CELL = 16, W = COLS * CELL, H = ROWS * CELL;
+  const TICK = 1 / 12;                 // worms move 12 cells per second
+  const START_TRAIL = 3, MAX_TRAIL = 40, LIVES = 3;
+  const PTS_SEC = 10, PTS_CRASH = 250;
+  const PLAYER_ID = 0, PLAYER_COLOR = '#ff5d8f';
+  const AI_COLORS = ['#9be14a', '#3fd3e6', '#ffb43b', '#b192ff', '#ff7c3f', '#4fe3a4', '#f4e04d', '#5aa2ff', '#ff4fd8', '#d7dde6'];
+  const TRAIL_CHOICES = [2, 2.5, 3, 3.5, 4, 4.5, 5];
+  const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
+  const DIR_LIST = Object.values(DIRS);
+  const HS_KEY = 'wormworld.scores.v1', NAME_KEY = 'wormworld.lastname';
+  const SEED_SCORES = [
+    { name: 'SLY', score: 3200, time: 240, crashes: 3 },
+    { name: 'MUD', score: 2400, time: 175, crashes: 2 },
+    { name: 'DRT', score: 1800, time: 130, crashes: 2 },
+    { name: 'LOM', score: 1200, time: 95, crashes: 1 },
+    { name: 'GRB', score: 600, time: 60, crashes: 0 },
+  ];
+  const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('field'), ctx = canvas.getContext('2d');
+  const stage = $('stage'), wrapEl = $('wrap');
+
+  // ---------- grid occupancy ----------
+  const owner = new Int16Array(COLS * ROWS).fill(-1);
+  const stamp = new Int32Array(COLS * ROWS);
+  const idx = (x, y) => y * COLS + x;
+  const wx = x => (x + COLS) % COLS, wy = y => (y + ROWS) % ROWS;
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  function wdist(ax, ay, bx, by) {
+    let dx = Math.abs(ax - bx), dy = Math.abs(ay - by);
+    return Math.min(dx, COLS - dx) + Math.min(dy, ROWS - dy);
+  }
+  function freeAhead(x, y, d, n) {
+    let k = 0;
+    for (; k < n; k++) { x = wx(x + d.x); y = wy(y + d.y); if (owner[idx(x, y)] !== -1) break; }
+    return k;
+  }
+  function areaFree(x, y, r) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++)
+      if (owner[idx(wx(x + dx), wy(y + dy))] !== -1) return false;
+    return true;
+  }
+  function bestDir(x, y) {
+    let best = DIRS.right, bs = -1;
+    for (const d of DIR_LIST) { const s = freeAhead(x, y, d, 12) + Math.random() * 0.5; if (s > bs) { bs = s; best = d; } }
+    return best;
+  }
+
+  // ---------- simulation ----------
+  let G = null;
+
+  function makeWorm(id, color, isPlayer) {
+    return { id, color, isPlayer, alive: false, x: 0, y: 0, dir: DIRS.right, cells: [], trailSec: START_TRAIL,
+      smart: .9, aggr: 0, turnRate: .08, lag: 8, distract: 0, born: -9, respawnAt: 0, nx: 0, ny: 0 };
+  }
+
+  function newSim(withPlayer) {
+    owner.fill(-1);
+    const g = { withPlayer, tick: 0, time: 0, survived: 0, bonus: 0, crashes: 0, lives: LIVES, bestTrail: START_TRAIL,
+      worms: [], ais: [], player: null, particles: [], floats: [], shake: 0, queue: [],
+      invulnUntil: 0, playerRespawnAt: 0, pendingOver: null };
+    if (withPlayer) {
+      const p = makeWorm(PLAYER_ID, PLAYER_COLOR, true);
+      g.player = p; g.worms.push(p);
+      p.alive = true; p.x = COLS >> 1; p.y = ROWS >> 1; p.dir = DIRS.right;
+      occupy(g, p, p.x, p.y, false);
+      g.invulnUntil = 1.5;
+    }
+    for (let i = 0; i < AI_COLORS.length; i++) {
+      const w = makeWorm(i + 1, AI_COLORS[i], false);
+      w.respawnAt = (withPlayer ? 0.8 : 0) + i * 0.5;
+      g.ais.push(w); g.worms.push(w);
+    }
+    return g;
+  }
+
+  function occupy(g, w, x, y, ghost) {
+    const i = idx(x, y);
+    w.cells.push({ x, y, t: g.tick });
+    if (!ghost || owner[i] === -1) { owner[i] = w.id; stamp[i] = g.tick; }
+  }
+  function releaseCell(w, c) {
+    const i = idx(c.x, c.y);
+    if (owner[i] === w.id && stamp[i] === c.t) owner[i] = -1;
+  }
+  function clearWorm(w) { for (const c of w.cells) releaseCell(w, c); w.cells = []; }
+  function expire(g, w) {
+    const maxAge = Math.round(w.trailSec / TICK);
+    while (w.cells.length > 1 && g.tick - w.cells[0].t >= maxAge) releaseCell(w, w.cells.shift());
+  }
+
+  function aiTarget(g) { return g.withPlayer ? Math.min(10, 4 + Math.floor(g.time / 20)) : 7; }
+  function difficulty(g) { return g.withPlayer ? Math.min(1, g.time / 150) : 0; }
+
+  function findSpot(pad, ok) {
+    for (let t = 0; t < 250; t++) {
+      const x = Math.floor(Math.random() * COLS), y = Math.floor(Math.random() * ROWS);
+      if (areaFree(x, y, pad) && ok(x, y)) return { x, y };
+    }
+    return null;
+  }
+
+  function spawnAI(g, w) {
+    const p = g.player;
+    const spot = findSpot(2, (x, y) => {
+      if (p && p.alive && wdist(x, y, p.x, p.y) < 14) return false;
+      for (const o of g.ais) if (o !== w && o.alive && wdist(x, y, o.x, o.y) < 5) return false;
+      return true;
+    });
+    if (!spot) { w.respawnAt = g.time + 0.5; return; }
+    const diff = difficulty(g);
+    Object.assign(w, {
+      x: spot.x, y: spot.y, dir: bestDir(spot.x, spot.y), cells: [], alive: true, born: g.time,
+      trailSec: pick(TRAIL_CHOICES),
+      smart: 0.86 + Math.random() * 0.12 - diff * 0.05,
+      aggr: g.withPlayer ? 0.15 + diff * 0.8 + Math.random() * 0.35 : 0,
+      turnRate: 0.04 + Math.random() * 0.08, lag: 4 + Math.floor(Math.random() * 14), distract: 0,
+    });
+    occupy(g, w, w.x, w.y, false);
+  }
+
+  function respawnPlayer(g) {
+    const p = g.player;
+    const spot = findSpot(3, (x, y) => {
+      for (const o of g.ais) if (o.alive && wdist(x, y, o.x, o.y) < 9) return false;
+      return true;
+    }) || findSpot(1, () => true) || { x: COLS >> 1, y: ROWS >> 1 };
+    p.x = spot.x; p.y = spot.y; p.dir = bestDir(p.x, p.y); p.cells = []; p.alive = true; p.born = g.time;
+    g.queue = [];
+    g.invulnUntil = g.time + 2;
+    occupy(g, p, p.x, p.y, true);
+  }
+
+  function aiThink(g, w) {
+    const p = g.player;
+    let tgt = null, near = false;
+    if (p && p.alive && p.cells.length && w.aggr > 0) {
+      tgt = p.cells[Math.max(0, p.cells.length - 1 - w.lag)];
+      near = wdist(w.x, w.y, p.x, p.y) < 9;
+    }
+    if (w.distract > 0) { w.distract--; return; }              // daydreaming: plough straight on
+    const lapse = (1 - w.smart) * 0.05 * (near ? 3.5 : 1);
+    if (Math.random() < lapse) { w.distract = 2 + Math.floor(Math.random() * 4); return; }
+
+    const straight = freeAhead(w.x, w.y, w.dir, 6);
+    const need = 1 + Math.floor(Math.random() * 3);
+    if (straight >= need && Math.random() > w.turnRate && !(tgt && Math.random() < 0.25)) return;
+
+    const opts = [w.dir, { x: w.dir.y, y: -w.dir.x }, { x: -w.dir.y, y: w.dir.x }];
+    let best = w.dir, bs = -1e9;
+    for (const d of opts) {
+      const f = d === w.dir ? straight : freeAhead(w.x, w.y, d, 6);
+      let s = f * 1.5 + (d === w.dir ? 1 : 0) + Math.random() * 2;
+      if (f === 0) s -= 50;
+      if (tgt) {
+        const now = wdist(w.x, w.y, tgt.x, tgt.y);
+        s += (now - wdist(wx(w.x + d.x), wy(w.y + d.y), tgt.x, tgt.y)) * w.aggr * 3;
+      }
+      if (s > bs) { bs = s; best = d; }
+    }
+    w.dir = best;
+  }
+
+  function step(g) {
+    g.tick++;
+    const p = g.player;
+    const pInv = !!p && g.time < g.invulnUntil;
+    const live = g.worms.filter(w => w.alive);
+
+    for (const w of live) {
+      if (w.isPlayer) {
+        while (g.queue.length) {
+          const d = g.queue.shift();
+          const reverse = d.x === -w.dir.x && d.y === -w.dir.y;
+          const same = d.x === w.dir.x && d.y === w.dir.y;
+          if (!reverse && !same) { w.dir = d; break; }
+        }
+      } else aiThink(g, w);
+      w.nx = wx(w.x + w.dir.x); w.ny = wy(w.y + w.dir.y);
+    }
+
+    const hit = new Map();
+    for (const w of live) {
+      const o = owner[idx(w.nx, w.ny)];
+      if (o !== -1 && !(w.isPlayer && pInv)) hit.set(w, o);
+    }
+    for (let a = 0; a < live.length; a++) for (let b = a + 1; b < live.length; b++) {
+      const A = live[a], B = live[b];
+      if (A.nx === B.nx && A.ny === B.ny) {
+        if (!(A.isPlayer && pInv)) hit.set(A, B.id);
+        if (!(B.isPlayer && pInv)) hit.set(B, A.id);
+      }
+    }
+    const playerHit = !!p && hit.has(p);
+
+    for (const w of live) {
+      if (hit.has(w)) crash(g, w, hit.get(w), playerHit);
+      else { w.x = w.nx; w.y = w.ny; occupy(g, w, w.x, w.y, w.isPlayer && pInv); }
+    }
+    for (const w of g.worms) if (w.alive) expire(g, w);
+  }
+
+  function crash(g, w, ownerId, playerHit) {
+    const cx = w.nx * CELL + CELL / 2, cy = w.ny * CELL + CELL / 2;
+    burst(g, cx, cy, w.color, w.isPlayer ? 46 : 22);
+    if (w.isPlayer) { loseLife(g); return; }
+    clearWorm(w); w.alive = false;
+    w.respawnAt = g.time + 1 + Math.random() * 1.5;
+    const p = g.player;
+    if (p && ownerId === PLAYER_ID && !playerHit && p.alive) {
+      const before = p.trailSec;
+      p.trailSec = Math.min(MAX_TRAIL, p.trailSec + w.trailSec);
+      const gained = p.trailSec - before;
+      g.bestTrail = Math.max(g.bestTrail, p.trailSec);
+      g.crashes++; g.bonus += PTS_CRASH;
+      floatText(g, cx, cy, `+${gained.toFixed(1)}s  +${PTS_CRASH}`, w.color);
+      bumpTrail();
+      sfx('bonus');
+    } else if (g.withPlayer) sfx('pop');
+  }
+
+  function loseLife(g) {
+    const p = g.player;
+    g.lives--;
+    clearWorm(p); p.alive = false;
+    g.queue = [];
+    g.shake = reduceMotion ? 0 : 0.5;
+    sfx('die');
+    if (g.lives <= 0) g.pendingOver = g.time + 1.6;
+    else g.playerRespawnAt = g.time + 1.4;
+  }
+
+  function update(g) {
+    g.time += TICK;
+    if (g.player && g.lives > 0) g.survived += TICK;
+    const target = aiTarget(g);
+    for (let i = 0; i < g.ais.length; i++) {
+      const w = g.ais[i];
+      if (i < target && !w.alive && g.time >= w.respawnAt) spawnAI(g, w);
+    }
+    const p = g.player;
+    if (p && !p.alive && g.lives > 0 && g.time >= g.playerRespawnAt) respawnPlayer(g);
+    step(g);
+    if (g.pendingOver !== null && g.time >= g.pendingOver) { g.pendingOver = null; gameOver(); }
+  }
+
+  const scoreOf = g => Math.floor(g.survived * PTS_SEC) + g.bonus;
+
+  // ---------- effects ----------
+  function burst(g, x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 150;
+      g.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: .5 + Math.random() * .5, max: 1, color, size: 2 + Math.random() * 3 });
+    }
+  }
+  function floatText(g, x, y, text, color) { g.floats.push({ x, y, text, color, life: 1.4 }); }
+  function updateFx(g, dt) {
+    for (const q of g.particles) { q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= .94; q.vy *= .94; q.life -= dt; }
+    g.particles = g.particles.filter(q => q.life > 0);
+    for (const f of g.floats) { f.y -= 22 * dt; f.life -= dt; }
+    g.floats = g.floats.filter(f => f.life > 0);
+    g.shake = Math.max(0, g.shake - dt);
+  }
+
+  // ---------- background: a soil cross-section ----------
+  const bg = document.createElement('canvas');
+  (function paintSoil() {
+    bg.width = W * 2; bg.height = H * 2;
+    const b = bg.getContext('2d'); b.scale(2, 2);
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const grad = b.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#24180f'); grad.addColorStop(1, '#150e09');
+    b.fillStyle = grad; b.fillRect(0, 0, W, H);
+    // strata bands
+    for (let i = 0; i < 5; i++) {
+      b.fillStyle = `rgba(${60 + rnd() * 30},${40 + rnd() * 20},${25 + rnd() * 10},0.08)`;
+      const y = rnd() * H, h = 30 + rnd() * 90;
+      b.beginPath(); b.moveTo(0, y);
+      for (let x = 0; x <= W; x += 64) b.lineTo(x, y + Math.sin(x / 140 + i) * 14);
+      b.lineTo(W, y + h); b.lineTo(0, y + h); b.closePath(); b.fill();
+    }
+    // roots
+    b.lineCap = 'round';
+    for (let i = 0; i < 9; i++) {
+      b.strokeStyle = `rgba(90,64,42,${0.18 + rnd() * 0.2})`; b.lineWidth = 1 + rnd() * 2;
+      let x = rnd() * W, y = 0;
+      b.beginPath(); b.moveTo(x, y);
+      for (let k = 0; k < 7; k++) { const nx = x + (rnd() - .5) * 120, ny = y + 30 + rnd() * 70; b.quadraticCurveTo(x + (rnd() - .5) * 60, (y + ny) / 2, nx, ny); x = nx; y = ny; }
+      b.stroke();
+    }
+    // grit
+    const grit = ['#3a2a1d', '#2e2117', '#0f0a06', '#4d3929', '#5a4632'];
+    for (let i = 0; i < 3200; i++) {
+      b.globalAlpha = 0.25 + rnd() * 0.5; b.fillStyle = grit[Math.floor(rnd() * grit.length)];
+      const s = rnd() < .9 ? 1 + rnd() * 1.5 : 2 + rnd() * 2.5;
+      b.fillRect(rnd() * W, rnd() * H, s, s);
+    }
+    // pebbles
+    for (let i = 0; i < 46; i++) {
+      const x = rnd() * W, y = rnd() * H, rx = 3 + rnd() * 9, ry = rx * (.55 + rnd() * .35), rot = rnd() * Math.PI;
+      b.globalAlpha = .55; b.fillStyle = rnd() < .5 ? '#3b2c20' : '#45372a';
+      b.beginPath(); b.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); b.fill();
+      b.globalAlpha = .18; b.fillStyle = '#c9b49a';
+      b.beginPath(); b.ellipse(x - rx * .25, y - ry * .3, rx * .35, ry * .25, rot, 0, Math.PI * 2); b.fill();
+    }
+    // faint grid dots so the cell scale reads
+    b.globalAlpha = 1; b.fillStyle = 'rgba(242,230,210,0.05)';
+    for (let y = 0; y <= ROWS; y++) for (let x = 0; x <= COLS; x++) b.fillRect(x * CELL - .75, y * CELL - .75, 1.5, 1.5);
+  })();
+
+  // ---------- rendering ----------
+  let viewScale = 1;
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    const scale = Math.max(0.1, Math.min(r.width / W, r.height / H));
+    const cw = Math.floor(W * scale), ch = Math.floor(H * scale);
+    const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+    wrapEl.style.width = cw + 'px'; wrapEl.style.height = ch + 'px';
+    canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+    canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
+    viewScale = (cw / W) * dpr;
+  }
+  window.addEventListener('resize', resize);
+
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
+
+  function drawWorm(g, w) {
+    const n = w.cells.length;
+    if (!n) return;
+    const maxAge = w.trailSec / TICK;
+    let a = 1;
+    if (w.isPlayer && g.time < g.invulnUntil && Math.floor(g.time * 10) % 2) a = 0.35;
+    ctx.fillStyle = w.color;
+    for (let i = 0; i < n - 1; i++) {
+      const c = w.cells[i];
+      const age = Math.min(1, (g.tick - c.t) / maxAge);
+      ctx.globalAlpha = (0.16 + 0.74 * (1 - age)) * a;
+      rr(c.x * CELL + 1.5, c.y * CELL + 1.5, CELL - 3, CELL - 3, 5);
+    }
+    // head
+    const cx = w.x * CELL + CELL / 2, cy = w.y * CELL + CELL / 2;
+    ctx.globalAlpha = a;
+    ctx.shadowColor = w.color; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.arc(cx, cy, CELL * 0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    const fx = w.dir.x, fy = w.dir.y, px = -fy, py = fx;
+    for (const s of [-1, 1]) {
+      const ex = cx + fx * 3 + px * s * 3.8, ey = cy + fy * 3 + py * s * 3.8;
+      ctx.fillStyle = '#fffaf2'; ctx.beginPath(); ctx.arc(ex, ey, 2.7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#120b07'; ctx.beginPath(); ctx.arc(ex + fx * 1.1, ey + fy * 1.1, 1.4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = w.color;
+    // spawn ripple
+    const since = g.time - w.born;
+    if (since < 0.7) {
+      ctx.globalAlpha = (1 - since / 0.7) * 0.8; ctx.strokeStyle = w.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, CELL * (0.8 + since * 4), 0, Math.PI * 2); ctx.stroke();
+    }
+    // locator ring for the player
+    if (w.isPlayer && g.time < g.invulnUntil + 0.5) {
+      ctx.globalAlpha = 0.5 + 0.3 * Math.sin(g.time * 12); ctx.strokeStyle = w.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, CELL * 1.5, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function centerText(big, small, color) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '56px Bungee, "Arial Black", sans-serif';
+    ctx.fillStyle = '#4a3627'; ctx.fillText(big, W / 2 + 4, H / 2 - 10 + 4);
+    ctx.fillStyle = color; ctx.fillText(big, W / 2, H / 2 - 10);
+    if (small) { ctx.font = '600 20px "IBM Plex Mono", monospace'; ctx.fillStyle = '#f2e6d2'; ctx.fillText(small, W / 2, H / 2 + 40); }
+  }
+
+  function render(g) {
+    ctx.setTransform(viewScale, 0, 0, viewScale, 0, 0);
+    if (g.shake > 0) ctx.translate((Math.random() - .5) * g.shake * 16, (Math.random() - .5) * g.shake * 16);
+    ctx.drawImage(bg, 0, 0, W, H);
+    for (const w of g.ais) if (w.alive) drawWorm(g, w);
+    if (g.player && g.player.alive) drawWorm(g, g.player);
+    for (const q of g.particles) {
+      ctx.globalAlpha = Math.max(0, q.life); ctx.fillStyle = q.color;
+      ctx.fillRect(q.x - q.size / 2, q.y - q.size / 2, q.size, q.size);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '15px Bungee, "Arial Black", sans-serif';
+    for (const f of g.floats) {
+      ctx.globalAlpha = Math.min(1, f.life);
+      ctx.fillStyle = '#110b07'; ctx.fillText(f.text, f.x + 2, f.y + 2);
+      ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+    if (g.withPlayer && g.player && !g.player.alive && state === 'playing') {
+      if (g.lives > 0) {
+        const left = Math.max(0, g.playerRespawnAt - g.time);
+        centerText('OUCH!', `${g.lives} ${g.lives === 1 ? 'life' : 'lives'} left · back in ${left.toFixed(1)}s`, '#ff5d8f');
+      } else centerText('GAME OVER', null, '#ff5d8f');
+    }
+  }
+
+  // ---------- HUD ----------
+  const hud = { score: $('hScore'), time: $('hTime'), trail: $('hTrail'), crash: $('hCrash'), high: $('hHigh'), lives: [...$('hLives').children] };
+  const fmtTime = s => { s = Math.floor(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  let lastHud = '';
+  function updateHUD() {
+    const g = G, playing = g.withPlayer;
+    const score = playing ? scoreOf(g) : 0;
+    const tops = [localScores()[0], world && world[0]].filter(Boolean).map(s => s.score);
+    const high = Math.max(0, score, ...tops);
+    const trail = playing ? g.player.trailSec : START_TRAIL;
+    const key = [score, Math.floor(playing ? g.survived : 0), trail, g.crashes, g.lives, high].join('|');
+    if (key === lastHud) return;
+    lastHud = key;
+    hud.score.textContent = score.toLocaleString();
+    hud.time.textContent = fmtTime(playing ? g.survived : 0);
+    hud.trail.textContent = trail.toFixed(1) + 's';
+    hud.crash.textContent = playing ? g.crashes : 0;
+    hud.high.textContent = high.toLocaleString();
+    hud.lives.forEach((el, i) => el.classList.toggle('lost', i >= (playing ? g.lives : LIVES)));
+  }
+  function bumpTrail() {
+    hud.trail.classList.remove('bump'); void hud.trail.offsetWidth; hud.trail.classList.add('bump');
+  }
+
+  // ---------- high scores ----------
+  let memScores = SEED_SCORES.slice();
+  const cleanName = s => String(s || '').toUpperCase().replace(/[^A-Z]/g, '').padEnd(3, 'A').slice(0, 3);
+  function localScores() {
+    try {
+      const raw = localStorage.getItem(HS_KEY);
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) return list.filter(s => s && Number.isFinite(s.score))
+          .map(s => ({ name: cleanName(s.name), score: Math.floor(s.score), time: +s.time || 0, crashes: +s.crashes || 0 }))
+          .sort((a, b) => b.score - a.score).slice(0, 10);
+      }
+    } catch (e) { /* storage unavailable */ }
+    return memScores;
+  }
+  function saveScores(list) {
+    memScores = list;
+    try { localStorage.setItem(HS_KEY, JSON.stringify(list)); } catch (e) { /* keep in memory */ }
+  }
+  function qualifiesIn(list, score) {
+    return score > 0 && (list.length < 10 || score > list[list.length - 1].score);
+  }
+  function fillTable(tbody, list, n, hiIdx) {
+    tbody.innerHTML = '';
+    for (let i = 0; i < n; i++) {
+      const s = list[i];
+      const tr = document.createElement('tr');
+      if (i === hiIdx) tr.className = 'me';
+      const cells = [String(i + 1), s ? s.name : '---', s ? s.score.toLocaleString() : '—', s ? fmtTime(s.time) : ''];
+      ['rk', 'nm', 'sc', 'tm'].forEach((cls, k) => { const td = document.createElement('td'); td.className = cls; td.textContent = cells[k]; tr.appendChild(td); });
+      tbody.appendChild(tr);
+    }
+  }
+
+  // ---------- world leaderboard (Netlify Function at /api) ----------
+  // When /api can't be reached (offline, or opened as a plain file) the game falls back to this device's scores.
+  let world = null, worldLoaded = false, boardView = 'world', ticket = null;
+  let highlight = { view: null, idx: -1 };
+  async function api(path, body) {
+    const opts = body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' };
+    const res = await fetch('/api/' + path, opts);
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* not JSON */ }
+    if (!res.ok || !data) throw new Error((data && data.error) || 'The world leaderboard is unavailable right now.');
+    return data;
+  }
+  async function loadWorld() {
+    try { const d = await api('scores'); world = Array.isArray(d.scores) ? d.scores : null; }
+    catch (e) { world = null; }
+    worldLoaded = true;
+    if (!world && boardView === 'world') boardView = 'mine';
+    renderBoards(); lastHud = '';
+  }
+  function renderBoards() {
+    const list = boardView === 'world' ? (world || []) : localScores();
+    const hi = highlight.view === boardView ? highlight.idx : -1;
+    fillTable($('titleScores'), list, 5, hi);
+    fillTable($('overScores'), list, 10, hi);
+    document.querySelectorAll('.tab').forEach(t => {
+      const on = t.dataset.board === boardView;
+      t.classList.toggle('on', on); t.setAttribute('aria-pressed', String(on));
+      if (t.dataset.board === 'world') {
+        t.disabled = worldLoaded && !world;
+        t.textContent = !worldLoaded ? 'World…' : world ? 'World' : 'World (offline)';
+      }
+    });
+  }
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => { boardView = t.dataset.board; renderBoards(); }));
+  const setStatus = text => { $('submitStatus').textContent = text; };
+
+  // ---------- screens ----------
+  let state = 'title', guardUntil = 0, entry = null, lastResult = null;
+  const ov = { title: $('ovTitle'), pause: $('ovPause'), over: $('ovOver') };
+  function showOverlay(name) { for (const k in ov) ov[k].hidden = k !== name; stage.classList.toggle('playing', !name); }
+  const guard = ms => { guardUntil = performance.now() + ms; };
+  const guarded = () => performance.now() < guardUntil;
+
+  function toTitle() {
+    G = newSim(false);
+    state = 'title';
+    highlight = { view: null, idx: -1 };
+    renderBoards();
+    loadWorld();
+    showOverlay('title'); guard(250);
+    $('btnStart').focus({ preventScroll: true });
+  }
+  function startGame() {
+    G = newSim(true);
+    state = 'playing'; acc = 0;
+    ticket = null;
+    api('start', {}).then(d => { ticket = d.ticket; }).catch(() => {});
+    showOverlay(null); guard(150);
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    sfx('start');
+  }
+  function pause() { if (state !== 'playing') return; state = 'paused'; showOverlay('pause'); $('btnResume').focus({ preventScroll: true }); }
+  function resume() { if (state !== 'paused') return; state = 'playing'; showOverlay(null); document.activeElement && document.activeElement.blur && document.activeElement.blur(); }
+
+  function gameOver() {
+    const g = G;
+    lastResult = { score: scoreOf(g), time: g.survived, crashes: g.crashes, trail: g.bestTrail };
+    $('fScore').textContent = lastResult.score.toLocaleString();
+    $('fTime').textContent = fmtTime(lastResult.time);
+    $('fCrash').textContent = lastResult.crashes;
+    $('fTrail').textContent = lastResult.trail.toFixed(1) + 's';
+    showOverlay('over'); guard(700);
+    setStatus('');
+    if (qualifiesIn(localScores(), lastResult.score) || (world && qualifiesIn(world, lastResult.score))) {
+      let last = 'AAA';
+      try { last = cleanName(localStorage.getItem(NAME_KEY) || 'AAA'); } catch (e) {}
+      entry = { letters: last.split(''), pos: 0 };
+      state = 'entry';
+      $('entryBox').hidden = false; $('tableBox').hidden = true; $('overButtons').hidden = true;
+      renderEntry();
+      sfx('hiscore');
+    } else {
+      showScores(-1);
+    }
+  }
+  function showScores() {
+    state = 'scores';
+    $('entryBox').hidden = true; $('tableBox').hidden = false; $('overButtons').hidden = false;
+    renderBoards();
+    $('btnAgain').focus({ preventScroll: true });
+  }
+  function commitEntry() {
+    const name = entry.letters.join('');
+    try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
+    const rec = { name, score: lastResult.score, time: Math.floor(lastResult.time), crashes: lastResult.crashes, d: Date.now() };
+    const list = localScores().concat([rec]).sort((a, b) => b.score - a.score).slice(0, 10);
+    saveScores(list);
+    highlight = { view: 'mine', idx: list.indexOf(rec) };
+    boardView = 'mine';
+    showScores();
+    guard(400);
+    if (!ticket) {
+      setStatus(world ? 'Saved on this device. This game could not be checked by the world board, so it was not sent.' : 'Saved on this device.');
+      return;
+    }
+    setStatus('Saved on this device. Sending to the world board…');
+    const sent = ticket; ticket = null;
+    api('scores', { ticket: sent, name, time: Math.floor(lastResult.time * 100) / 100, crashes: lastResult.crashes })
+      .then(d => {
+        world = d.scores; worldLoaded = true;
+        if (d.rank && d.rank <= 10) {
+          highlight = { view: 'world', idx: d.rank - 1 }; boardView = 'world';
+          setStatus(`You're #${d.rank} in the world!`);
+        } else if (d.rank) setStatus(`Saved. You're #${d.rank} on the world board.`);
+        else setStatus('Saved on this device. Not quite enough for the world top 100 yet.');
+        renderBoards(); lastHud = '';
+      })
+      .catch(e => setStatus('Saved on this device. ' + e.message));
+  }
+
+  // initials slots
+  const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const slotsEl = $('slots');
+  for (let i = 0; i < 3; i++) {
+    const s = document.createElement('div'); s.className = 'slot';
+    s.innerHTML = `<button class="arrow" type="button" aria-label="Next letter">▲</button><div class="ch"></div><button class="arrow" type="button" aria-label="Previous letter">▼</button>`;
+    const [up, ch, down] = s.children;
+    up.addEventListener('click', () => { entry.pos = i; cycle(1); });
+    down.addEventListener('click', () => { entry.pos = i; cycle(-1); });
+    ch.addEventListener('click', () => { entry.pos = i; renderEntry(); });
+    slotsEl.appendChild(s);
+  }
+  function cycle(dir) {
+    const c = entry.letters[entry.pos];
+    entry.letters[entry.pos] = ALPHA[(ALPHA.indexOf(c) + dir + 26) % 26];
+    renderEntry(); sfx('tick');
+  }
+  function renderEntry() {
+    [...slotsEl.children].forEach((s, i) => { s.querySelector('.ch').textContent = entry.letters[i]; s.classList.toggle('active', i === entry.pos); });
+  }
+
+  // ---------- input ----------
+  const KEYDIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right', W: 'up', S: 'down', A: 'left', D: 'right' };
+  function queueDir(name) {
+    if (state !== 'playing' || !G.player || !G.player.alive) return;
+    const d = DIRS[name];
+    const q = G.queue, last = q.length ? q[q.length - 1] : G.player.dir;
+    if (d === last || (d.x === last.x && d.y === last.y)) return;
+    if (q.length < 3) q.push(d);
+  }
+
+  window.addEventListener('keydown', e => {
+    const k = e.key;
+    if (k.startsWith('Arrow') || k === ' ') e.preventDefault();
+    audioInit();
+    if (k === 'm' || k === 'M') { if (state !== 'entry') { toggleMute(); return; } }
+    if (state === 'playing') {
+      if (KEYDIR[k]) queueDir(KEYDIR[k]);
+      else if (k === 'p' || k === 'P' || k === 'Escape') pause();
+      return;
+    }
+    if (guarded()) return;
+    if (state === 'title') {
+      if (k === 'Enter' || k === ' ') { e.preventDefault(); startGame(); }
+    } else if (state === 'paused') {
+      if (k === 'p' || k === 'P' || k === 'Escape') resume();
+    } else if (state === 'entry') {
+      e.preventDefault();
+      if (/^[a-zA-Z]$/.test(k)) { entry.letters[entry.pos] = k.toUpperCase(); entry.pos = Math.min(2, entry.pos + 1); renderEntry(); sfx('tick'); }
+      else if (k === 'Backspace') { entry.pos = Math.max(0, entry.pos - 1); renderEntry(); }
+      else if (k === 'ArrowUp') cycle(1);
+      else if (k === 'ArrowDown') cycle(-1);
+      else if (k === 'ArrowLeft') { entry.pos = Math.max(0, entry.pos - 1); renderEntry(); }
+      else if (k === 'ArrowRight') { entry.pos = Math.min(2, entry.pos + 1); renderEntry(); }
+      else if (k === 'Enter') commitEntry();
+    } else if (state === 'scores') {
+      if (k === 'Enter' || k === ' ') { e.preventDefault(); startGame(); }
+      else if (k === 'Escape') toTitle();
+    }
+  });
+
+  let touch = null;
+  stage.addEventListener('touchstart', e => { audioInit(); const t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });
+  stage.addEventListener('touchmove', e => {
+    if (!touch || state !== 'playing') return;
+    e.preventDefault();
+    const t = e.touches[0], dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 22) return;
+    queueDir(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+    touch = { x: t.clientX, y: t.clientY };
+  }, { passive: false });
+  stage.addEventListener('touchend', () => { touch = null; });
+
+  $('btnStart').addEventListener('click', () => { audioInit(); startGame(); });
+  $('btnResume').addEventListener('click', resume);
+  $('btnQuit').addEventListener('click', toTitle);
+  $('btnAgain').addEventListener('click', startGame);
+  $('btnTitle').addEventListener('click', toTitle);
+  $('btnSave').addEventListener('click', () => { if (state === 'entry') commitEntry(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+
+  // ---------- sound ----------
+  let actx = null, muted = false;
+  function audioInit() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } }
+    if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
+  }
+  function tone(f, d, type = 'square', v = 0.05, f2 = 0, delay = 0) {
+    if (!actx || muted) return;
+    const t = actx.currentTime + delay;
+    const o = actx.createOscillator(), gn = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    gn.gain.setValueAtTime(v, t); gn.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(gn).connect(actx.destination); o.start(t); o.stop(t + d + 0.03);
+  }
+  function sfx(name) {
+    if (name === 'pop') tone(260, 0.12, 'triangle', 0.04, 110);
+    else if (name === 'bonus') { tone(660, 0.08, 'square', 0.04); tone(990, 0.14, 'square', 0.04, 0, 0.08); }
+    else if (name === 'die') tone(240, 0.6, 'sawtooth', 0.06, 45);
+    else if (name === 'start') [392, 523, 659, 784].forEach((f, i) => tone(f, 0.1, 'square', 0.035, 0, i * 0.08));
+    else if (name === 'hiscore') [523, 659, 784, 1046, 784, 1046].forEach((f, i) => tone(f, 0.1, 'square', 0.035, 0, i * 0.09));
+    else if (name === 'tick') tone(880, 0.03, 'square', 0.025);
+  }
+  function toggleMute() { muted = !muted; $('soundState').textContent = 'Sound: ' + (muted ? 'off' : 'on'); }
+
+  // ---------- main loop ----------
+  let acc = 0, last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (state !== 'paused') {
+      acc += dt;
+      while (acc >= TICK) { acc -= TICK; update(G); }
+      updateFx(G, dt);
+    }
+    render(G);
+    updateHUD();
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  toTitle();
+  requestAnimationFrame(t => { last = t; frame(t); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { lastHud = ''; resize(); });
+})();
+</script>
+</body>
+</html>

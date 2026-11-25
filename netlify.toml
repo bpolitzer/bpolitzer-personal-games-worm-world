@@ -1,0 +1,8 @@
+# Netlify reads this file when the site is connected to this GitHub repo.
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+  command = ""
+
+[functions]
+  node_bundler = "esbuild"
